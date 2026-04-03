@@ -1,30 +1,32 @@
 import os
 import json
 import logging
+import gspread
+from aiohttp import web
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InputMediaPhoto
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
-import gspread
 
 logging.basicConfig(level=logging.INFO)
 
-# ===== Переменные окружения =====
+# Переменные окружения
 BOT_TOKEN = os.environ['BOT_TOKEN']
 SHEET_ID = os.environ['SHEET_ID']
-PORT = int(os.environ.get('PORT', 8000))
-WEBHOOK_URL = os.environ['WEBHOOK_URL']  # https://<your-render-url>/
-SERVICE_ACCOUNT_JSON = json.loads(os.environ['SERVICE_ACCOUNT_JSON'])
+PORT = int(os.environ.get('PORT', '8000'))
+WEBHOOK_URL = os.environ['WEBHOOK_URL']
 
-# ===== Google Sheets =====
-gc = gspread.service_account_from_dict(SERVICE_ACCOUNT_JSON)
+# Подключение к Google Sheets
+sa_json = json.loads(os.environ['SERVICE_ACCOUNT_JSON'])
+gc = gspread.service_account_from_dict(sa_json)
 sh = gc.open_by_key(SHEET_ID)
 ws = sh.sheet1
 
-# ===== Клавиатуры =====
+# Клавиатуры
 LANG_KB = ReplyKeyboardMarkup(
     [[KeyboardButton("Узбекский 🇺🇿"), KeyboardButton("Русский 🇷🇺")]], resize_keyboard=True
 )
 MAIN_KB = ReplyKeyboardMarkup(
-    [[KeyboardButton("Каталог"), KeyboardButton("Связаться"), KeyboardButton("Местоположение")]], resize_keyboard=True
+    [[KeyboardButton("Каталог"), KeyboardButton("Связаться"), KeyboardButton("Местоположение")]],
+    resize_keyboard=True
 )
 CATALOG_KB = ReplyKeyboardMarkup(
     [
@@ -33,61 +35,54 @@ CATALOG_KB = ReplyKeyboardMarkup(
         [KeyboardButton("Назад")]
     ], resize_keyboard=True
 )
-PAGER_KB = lambda more=True: ReplyKeyboardMarkup(
+PAGER_KB = lambda more: ReplyKeyboardMarkup(
     [[KeyboardButton("еще/yana"), KeyboardButton("Назад/orqaga")]], resize_keyboard=True
 )
 
-# ===== Колонки Google Sheets =====
 COL_MAP = {"Мягкая мебель": "B", "Спальни": "C", "Кухонная гарнитура": "D", "Видео": "E"}
 
-
-# ===== Обработчики =====
+# Обработчики
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Выберите язык", reply_markup=LANG_KB)
-
 
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     user_data = context.user_data
 
-    # Выбор языка
-    if text in ("Узбекский 🇺🇿", "Русский 🇷🇺"):
+    if text in ("Узбекский 🇺🇿","Русский 🇷🇺"):
         user_data.clear()
         await update.message.reply_text("Чем я могу вам помочь?", reply_markup=MAIN_KB)
         return
 
-    # Главные кнопки
     if text == "Каталог":
         await update.message.reply_text("Какая мебель вам нужна?", reply_markup=CATALOG_KB)
         return
+
     if text == "Связаться":
         val = ws.acell('F1').value or "Контакты отсутствуют"
         await update.message.reply_text(val, reply_markup=MAIN_KB)
         return
+
     if text == "Местоположение":
         val = ws.acell('F2').value or "Местоположение отсутствует"
         await update.message.reply_text(val, reply_markup=MAIN_KB)
         return
 
-    # Категории
     if text in COL_MAP:
         user_data['col'] = COL_MAP[text]
         user_data['idx'] = 1
         await send_page(update, context)
         return
 
-    # Пагинация
-    if text in ("еще/yana", "еще", "yana"):
+    if text in ("еще/yana","еще","yana"):
         await send_page(update, context, next_page=True)
         return
 
-    # Назад
-    if text in ("Назад", "orqaga", "Назад/orqaga"):
+    if text in ("Назад","orqaga","Назад/orqaga"):
         await update.message.reply_text("Чем я могу вам помочь?", reply_markup=MAIN_KB)
         return
 
     await update.message.reply_text("Не понял. Выберите опцию.", reply_markup=MAIN_KB)
-
 
 async def send_page(update: Update, context: ContextTypes.DEFAULT_TYPE, next_page=False):
     user_data = context.user_data
@@ -100,10 +95,10 @@ async def send_page(update: Update, context: ContextTypes.DEFAULT_TYPE, next_pag
     if next_page:
         idx += 10
 
-    # Берём значения из Google Sheets
     values = ws.col_values(ord(col) - ord('A') + 1)
     photos = []
-    for i in range(idx - 1, min(idx - 1 + 10, len(values))):
+
+    for i in range(idx-1, min(idx-1+10, len(values))):
         url = values[i].strip()
         if url:
             photos.append(InputMediaPhoto(media=url))
@@ -120,28 +115,38 @@ async def send_page(update: Update, context: ContextTypes.DEFAULT_TYPE, next_pag
         await update.message.reply_media_group(photos)
         await update.message.reply_text("Выберите:", reply_markup=PAGER_KB(True))
 
-
-# ===== Webhook setup =====
-async def on_startup(app):
-    bot = app.bot
-    await bot.set_webhook(WEBHOOK_URL + BOT_TOKEN)
-    logging.info(f"Webhook установлен: {WEBHOOK_URL + BOT_TOKEN}")
-
-
+# Создание приложения
 def build_app():
-    application = ApplicationBuilder().token(BOT_TOKEN).build()
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
-    application.post_init = on_startup
-    return application
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
+    return app
 
+# aiohttp webhook сервер
+async def handle_webhook(request):
+    data = await request.json()
+    update = Update.de_json(data, request.app.bot)
+    await request.app.bot.process_update(update)
+    return web.Response(text="OK")
 
-# ===== Main =====
 if __name__ == "__main__":
     app = build_app()
-    app.run_webhook(
-        listen="0.0.0.0",
-        port=PORT,
-        webhook_path=f"/{BOT_TOKEN}",
-        webhook_url=WEBHOOK_URL + BOT_TOKEN
-    )
+
+    # Настройка aiohttp
+    web_app = web.Application()
+    web_app.bot = app.bot
+    web_app.router.add_post(f"/{BOT_TOKEN}", handle_webhook)
+
+    # Установка вебхука
+    import asyncio
+    async def main():
+        await app.bot.set_webhook(WEBHOOK_URL + BOT_TOKEN)
+        runner = web.AppRunner(web_app)
+        await runner.setup()
+        site = web.TCPSite(runner, "0.0.0.0", PORT)
+        await site.start()
+        print(f"Bot is running on port {PORT}...")
+        while True:
+            await asyncio.sleep(3600)
+
+    asyncio.run(main())
