@@ -1,6 +1,5 @@
 import os
 import json
-import asyncio
 import logging
 import gspread
 
@@ -11,32 +10,26 @@ logging.basicConfig(level=logging.INFO)
 
 print("BOT STARTING")
 
-try:
-    BOT_TOKEN = os.environ["BOT_TOKEN"]
-    SHEET_ID = os.environ["SHEET_ID"]
-    SERVICE_ACCOUNT_JSON = os.environ["SERVICE_ACCOUNT_JSON"]
-except Exception as e:
-    print("ENV ERROR:", e)
-    raise
+BOT_TOKEN = os.environ["BOT_TOKEN"]
+SHEET_ID = os.environ["SHEET_ID"]
+SERVICE_ACCOUNT_JSON = os.environ["SERVICE_ACCOUNT_JSON"]
 
 print("ENV OK")
 
-try:
-    creds = json.loads(SERVICE_ACCOUNT_JSON)
-    gc = gspread.service_account_from_dict(creds)
-    sh = gc.open_by_key(SHEET_ID)
-    ws = sh.sheet1
-    print("GOOGLE SHEETS CONNECTED")
-except Exception as e:
-    print("GOOGLE ERROR:", e)
-    raise
+# Google Sheets
+creds = json.loads(SERVICE_ACCOUNT_JSON)
+gc = gspread.service_account_from_dict(creds)
+sh = gc.open_by_key(SHEET_ID)
+ws = sh.sheet1
+
+print("GOOGLE SHEETS CONNECTED")
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Бот работает ✅")
 
 
-async def main():
+def main():
 
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
@@ -44,8 +37,8 @@ async def main():
 
     print("BOT STARTED")
 
-    await app.run_polling()
+    app.run_polling()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
