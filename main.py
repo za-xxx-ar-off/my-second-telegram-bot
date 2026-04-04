@@ -151,8 +151,9 @@ async def main():
     await app.run_webhook(
         listen="0.0.0.0",
         port=PORT,
-        webhook_url=WEBHOOK_URL + BOT_TOKEN,
-        webhook_path=BOT_TOKEN
+        url_path=BOT_TOKEN,
+        webhook_url=WEBHOOK_URL + BOT_TOKEN
+)
     )
 
 if __name__ == "__main__":
