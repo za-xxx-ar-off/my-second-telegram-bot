@@ -4,39 +4,25 @@ import logging
 import asyncio
 import gspread
 
-from telegram import (
-    Update,
-    ReplyKeyboardMarkup,
-    KeyboardButton,
-    InputMediaPhoto
-)
-
-from telegram.ext import (
-    ApplicationBuilder,
-    ContextTypes,
-    CommandHandler,
-    MessageHandler,
-    filters
-)
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InputMediaPhoto
+from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
 
 logging.basicConfig(level=logging.INFO)
 
-# =========================
-# ENV VARIABLES
-# =========================
+print("STARTING BOT...")
 
+# ENV
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 SHEET_ID = os.environ.get("SHEET_ID")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 SERVICE_ACCOUNT_JSON = os.environ.get("SERVICE_ACCOUNT_JSON")
 PORT = int(os.environ.get("PORT", "10000"))
 
-print("ENV LOADED")
+print("BOT_TOKEN:", "OK" if BOT_TOKEN else "MISSING")
+print("SHEET_ID:", "OK" if SHEET_ID else "MISSING")
+print("WEBHOOK_URL:", WEBHOOK_URL)
 
-# =========================
-# GOOGLE SHEETS
-# =========================
-
+# GOOGLE
 try:
     sa_json = json.loads(SERVICE_ACCOUNT_JSON)
     gc = gspread.service_account_from_dict(sa_json)
@@ -44,7 +30,7 @@ try:
     ws = sh.sheet1
     print("GOOGLE SHEETS CONNECTED")
 except Exception as e:
-    print("GOOGLE SHEETS ERROR:", e)
+    print("GOOGLE ERROR:", e)
     raise
 
 # =========================
