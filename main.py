@@ -4,30 +4,52 @@ import logging
 import asyncio
 import gspread
 
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InputMediaPhoto
-from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
+from telegram import (
+    Update,
+    ReplyKeyboardMarkup,
+    KeyboardButton,
+    InputMediaPhoto
+)
+
+from telegram.ext import (
+    ApplicationBuilder,
+    ContextTypes,
+    CommandHandler,
+    MessageHandler,
+    filters
+)
 
 logging.basicConfig(level=logging.INFO)
 
-try:
-    BOT_TOKEN = os.environ["BOT_TOKEN"]
-    SHEET_ID = os.environ["SHEET_ID"]
-    WEBHOOK_URL = os.environ["WEBHOOK_URL"]
-    SERVICE_ACCOUNT_JSON = os.environ["SERVICE_ACCOUNT_JSON"]
-    PORT = int(os.environ.get("PORT", "8000"))
-except Exception as e:
-    print("ENV ERROR:", e)
-    raise
+# =========================
+# ENV VARIABLES
+# =========================
 
-# Google Sheets
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+SHEET_ID = os.environ.get("SHEET_ID")
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
+SERVICE_ACCOUNT_JSON = os.environ.get("SERVICE_ACCOUNT_JSON")
+PORT = int(os.environ.get("PORT", "10000"))
+
+print("ENV LOADED")
+
+# =========================
+# GOOGLE SHEETS
+# =========================
+
 try:
     sa_json = json.loads(SERVICE_ACCOUNT_JSON)
     gc = gspread.service_account_from_dict(sa_json)
     sh = gc.open_by_key(SHEET_ID)
     ws = sh.sheet1
+    print("GOOGLE SHEETS CONNECTED")
 except Exception as e:
     print("GOOGLE SHEETS ERROR:", e)
     raise
+
+# =========================
+# KEYBOARDS
+# =========================
 
 LANG_KB = ReplyKeyboardMarkup(
     [[KeyboardButton("Узбекский 🇺🇿"), KeyboardButton("Русский 🇷🇺")]],
@@ -35,7 +57,10 @@ LANG_KB = ReplyKeyboardMarkup(
 )
 
 MAIN_KB = ReplyKeyboardMarkup(
-    [[KeyboardButton("Каталог"), KeyboardButton("Связаться"), KeyboardButton("Местоположение")]],
+    [
+        [KeyboardButton("Каталог")],
+        [KeyboardButton("Связаться"), KeyboardButton("Местоположение")]
+    ],
     resize_keyboard=True
 )
 
@@ -48,8 +73,8 @@ CATALOG_KB = ReplyKeyboardMarkup(
     resize_keyboard=True
 )
 
-PAGER_KB = lambda more: ReplyKeyboardMarkup(
-    [[KeyboardButton("еще/yana"), KeyboardButton("Назад/orqaga")]],
+PAGER_KB = ReplyKeyboardMarkup(
+    [[KeyboardButton("еще/yana"), KeyboardButton("Назад")]],
     resize_keyboard=True
 )
 
@@ -60,20 +85,38 @@ COL_MAP = {
     "Видео": "E"
 }
 
+# =========================
+# BOT COMMANDS
+# =========================
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Выберите язык", reply_markup=LANG_KB)
+    await update.message.reply_text(
+        "Выберите язык",
+        reply_markup=LANG_KB
+    )
+
+# =========================
+# TEXT HANDLER
+# =========================
 
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
     text = update.message.text
     user_data = context.user_data
 
-    if text in ("Узбекский 🇺🇿","Русский 🇷🇺"):
+    if text in ("Узбекский 🇺🇿", "Русский 🇷🇺"):
         user_data.clear()
-        await update.message.reply_text("Чем я могу вам помочь?", reply_markup=MAIN_KB)
+        await update.message.reply_text(
+            "Чем я могу вам помочь?",
+            reply_markup=MAIN_KB
+        )
         return
 
     if text == "Каталог":
-        await update.message.reply_text("Какая мебель вам нужна?", reply_markup=CATALOG_KB)
+        await update.message.reply_text(
+            "Какая мебель вам нужна?",
+            reply_markup=CATALOG_KB
+        )
         return
 
     if text == "Связаться":
@@ -92,22 +135,36 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send_page(update, context)
         return
 
-    if text in ("еще/yana","еще","yana"):
+    if text in ("еще/yana", "еще", "yana"):
         await send_page(update, context, next_page=True)
         return
 
-    if text in ("Назад","orqaga","Назад/orqaga"):
-        await update.message.reply_text("Чем я могу вам помочь?", reply_markup=MAIN_KB)
+    if text == "Назад":
+        await update.message.reply_text(
+            "Чем я могу вам помочь?",
+            reply_markup=MAIN_KB
+        )
         return
 
-    await update.message.reply_text("Не понял. Выберите опцию.", reply_markup=MAIN_KB)
+    await update.message.reply_text(
+        "Выберите кнопку",
+        reply_markup=MAIN_KB
+    )
+
+# =========================
+# SEND PHOTOS
+# =========================
 
 async def send_page(update: Update, context: ContextTypes.DEFAULT_TYPE, next_page=False):
+
     user_data = context.user_data
     col = user_data.get("col")
 
     if not col:
-        await update.message.reply_text("Выберите категорию.", reply_markup=CATALOG_KB)
+        await update.message.reply_text(
+            "Выберите категорию",
+            reply_markup=CATALOG_KB
+        )
         return
 
     idx = user_data.get("idx", 1)
@@ -119,42 +176,60 @@ async def send_page(update: Update, context: ContextTypes.DEFAULT_TYPE, next_pag
 
     photos = []
 
-    for i in range(idx-1, min(idx-1+10, len(values))):
+    for i in range(idx - 1, min(idx - 1 + 10, len(values))):
         url = values[i].strip()
+
         if url:
             photos.append(InputMediaPhoto(media=url))
 
     if not photos:
-        await update.message.reply_text("Больше нет фотографий.", reply_markup=CATALOG_KB)
+        await update.message.reply_text(
+            "Больше фотографий нет",
+            reply_markup=CATALOG_KB
+        )
         return
 
     user_data["idx"] = idx
 
     if len(photos) == 1:
-        await update.message.reply_photo(photos[0].media, reply_markup=PAGER_KB(True))
+        await update.message.reply_photo(
+            photos[0].media,
+            reply_markup=PAGER_KB
+        )
     else:
         await update.message.reply_media_group(photos)
-        await update.message.reply_text("Выберите:", reply_markup=PAGER_KB(True))
+        await update.message.reply_text(
+            "Выберите:",
+            reply_markup=PAGER_KB
+        )
+
+# =========================
+# MAIN
+# =========================
 
 async def main():
-    print("BOT STARTING...")
+
+    print("BOT STARTING")
 
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
 
-    await app.bot.set_webhook(WEBHOOK_URL + BOT_TOKEN)
+    webhook_url = WEBHOOK_URL + BOT_TOKEN
 
-    print("WEBHOOK SET")
+    await app.bot.set_webhook(webhook_url)
+
+    print("WEBHOOK SET:", webhook_url)
 
     await app.run_webhook(
         listen="0.0.0.0",
         port=PORT,
         url_path=BOT_TOKEN,
-        webhook_url=WEBHOOK_URL + BOT_TOKEN
-)
+        webhook_url=webhook_url
     )
+
+# =========================
 
 if __name__ == "__main__":
     asyncio.run(main())
