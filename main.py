@@ -22,89 +22,128 @@ gc = gspread.service_account_from_dict(creds)
 sh = gc.open_by_key(SHEET_ID)
 ws = sh.sheet1
 
+# ===== ТЕКСТЫ =====
+TEXTS = {
+    "ru": {
+        "choose_lang": "Выберите язык",
+        "menu": "Чем я могу помочь?",
+        "catalog": "Каталог",
+        "contact": "Связаться",
+        "location": "Местоположение",
+        "more": "еще",
+        "back": "Назад",
+        "next": "Дальше?",
+        "no_photo": "Больше нет фото",
+        "no_contacts": "Нет контактов",
+        "no_address": "Нет адреса",
+        "choose_btn": "Выберите кнопку"
+    },
+    "uz": {
+        "choose_lang": "Tilni tanlang",
+        "menu": "Qanday yordam bera olaman?",
+        "catalog": "Katalog",
+        "contact": "Bog‘lanish",
+        "location": "Joylashuv",
+        "more": "yana",
+        "back": "orqaga",
+        "next": "Davom etamizmi?",
+        "no_photo": "Boshqa rasm yo‘q",
+        "no_contacts": "Kontakt yo‘q",
+        "no_address": "Manzil yo‘q",
+        "choose_btn": "Tugmani tanlang"
+    }
+}
+
 # ===== КНОПКИ =====
+def get_main_kb(lang):
+    t = TEXTS[lang]
+    return ReplyKeyboardMarkup(
+        [[KeyboardButton(t["catalog"]), KeyboardButton(t["contact"]), KeyboardButton(t["location"])]],
+        resize_keyboard=True
+    )
+
+def get_pager_kb(lang):
+    t = TEXTS[lang]
+    return ReplyKeyboardMarkup(
+        [[KeyboardButton(t["more"]), KeyboardButton(t["back"])]],
+        resize_keyboard=True
+    )
+
 LANG_KB = ReplyKeyboardMarkup(
     [[KeyboardButton("Узбекский 🇺🇿"), KeyboardButton("Русский 🇷🇺")]],
     resize_keyboard=True
 )
 
-MAIN_KB = ReplyKeyboardMarkup(
-    [[KeyboardButton("Каталог"), KeyboardButton("Связаться"), KeyboardButton("Местоположение")]],
-    resize_keyboard=True
-)
-
-CATALOG_KB = ReplyKeyboardMarkup(
-    [
-        [KeyboardButton("Мягкая мебель"), KeyboardButton("Спальни")],
-        [KeyboardButton("Кухонная гарнитура"), KeyboardButton("Видео")],
-        [KeyboardButton("Назад")]
-    ],
-    resize_keyboard=True
-)
-
-def pager_kb():
-    return ReplyKeyboardMarkup(
-        [[KeyboardButton("еще"), KeyboardButton("Назад")]],
-        resize_keyboard=True
-    )
-
-COL_MAP = {
-    "Мягкая мебель": "B",
-    "Спальни": "C",
-    "Кухонная гарнитура": "D",
-    "Видео": "E"
-}
-
 # ===== ЛОГИКА =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Выберите язык", reply_markup=LANG_KB)
+
+def get_lang(user_data):
+    return user_data.get("lang", "ru")
 
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     user_data = context.user_data
 
-    if text in ("Узбекский 🇺🇿","Русский 🇷🇺"):
+    # выбор языка
+    if text == "Русский 🇷🇺":
         user_data.clear()
-        await update.message.reply_text("Чем я могу помочь?", reply_markup=MAIN_KB)
+        user_data["lang"] = "ru"
+        t = TEXTS["ru"]
+        await update.message.reply_text(t["menu"], reply_markup=get_main_kb("ru"))
         return
 
-    if text == "Каталог":
-        await update.message.reply_text("Выберите категорию", reply_markup=CATALOG_KB)
+    if text == "Узбекский 🇺🇿":
+        user_data.clear()
+        user_data["lang"] = "uz"
+        t = TEXTS["uz"]
+        await update.message.reply_text(t["menu"], reply_markup=get_main_kb("uz"))
         return
 
-    if text == "Связаться":
-        val = ws.acell("F1").value or "Нет контактов"
-        await update.message.reply_text(val, reply_markup=MAIN_KB)
-        return
+    lang = get_lang(user_data)
+    t = TEXTS[lang]
 
-    if text == "Местоположение":
-        val = ws.acell("F2").value or "Нет адреса"
-        await update.message.reply_text(val, reply_markup=MAIN_KB)
-        return
-
-    if text in COL_MAP:
-        user_data["col"] = COL_MAP[text]
+    # каталог
+    if text == t["catalog"]:
+        user_data["col"] = "A"
         user_data["idx"] = 1
         await send_page(update, context)
         return
 
-    if text == "еще":
+    # связаться
+    if text == t["contact"]:
+        val = ws.acell("B1").value or t["no_contacts"]
+        await update.message.reply_text(val, reply_markup=get_main_kb(lang))
+        return
+
+    # местоположение
+    if text == t["location"]:
+        val = ws.acell("C1").value or t["no_address"]
+        await update.message.reply_text(val, reply_markup=get_main_kb(lang))
+        return
+
+    # еще / yana
+    if text == t["more"]:
         await send_page(update, context, next_page=True)
         return
 
-    if text == "Назад":
-        await update.message.reply_text("Главное меню", reply_markup=MAIN_KB)
+    # назад / orqaga
+    if text == t["back"]:
+        await update.message.reply_text(t["menu"], reply_markup=get_main_kb(lang))
         return
 
-    await update.message.reply_text("Выберите кнопку", reply_markup=MAIN_KB)
+    await update.message.reply_text(t["choose_btn"], reply_markup=get_main_kb(lang))
 
 
 async def send_page(update: Update, context: ContextTypes.DEFAULT_TYPE, next_page=False):
     user_data = context.user_data
+    lang = get_lang(user_data)
+    t = TEXTS[lang]
+
     col = user_data.get("col")
 
     if not col:
-        await update.message.reply_text("Сначала выберите категорию", reply_markup=CATALOG_KB)
+        await update.message.reply_text(t["catalog"], reply_markup=get_main_kb(lang))
         return
 
     idx = user_data.get("idx", 1)
@@ -121,16 +160,16 @@ async def send_page(update: Update, context: ContextTypes.DEFAULT_TYPE, next_pag
             photos.append(InputMediaPhoto(media=url))
 
     if not photos:
-        await update.message.reply_text("Больше нет фото", reply_markup=CATALOG_KB)
+        await update.message.reply_text(t["no_photo"], reply_markup=get_main_kb(lang))
         return
 
     user_data["idx"] = idx
 
     if len(photos) == 1:
-        await update.message.reply_photo(photos[0].media, reply_markup=pager_kb())
+        await update.message.reply_photo(photos[0].media, reply_markup=get_pager_kb(lang))
     else:
         await update.message.reply_media_group(photos)
-        await update.message.reply_text("Дальше?", reply_markup=pager_kb())
+        await update.message.reply_text(t["next"], reply_markup=get_pager_kb(lang))
 
 
 # ===== WEBHOOK =====
