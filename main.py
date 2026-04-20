@@ -22,6 +22,16 @@ gc = gspread.service_account_from_dict(creds)
 sh = gc.open_by_key(SHEET_ID)
 ws = sh.sheet1
 
+# ===== 🔥 ВАЖНО: КОНВЕРТАЦИЯ GOOGLE DRIVE ССЫЛОК =====
+def convert_drive_url(url: str) -> str:
+    if "drive.google.com" in url:
+        try:
+            file_id = url.split("/d/")[1].split("/")[0]
+            return f"https://drive.google.com/uc?export=view&id={file_id}"
+        except:
+            return url
+    return url
+
 # ===== ТЕКСТЫ =====
 TEXTS = {
     "ru": {
@@ -155,7 +165,8 @@ async def send_page(update: Update, context: ContextTypes.DEFAULT_TYPE, next_pag
 
     photos = []
     for i in range(idx - 1, min(idx - 1 + 10, len(values))):
-        url = values[i].strip()
+        raw_url = values[i].strip()
+        url = convert_drive_url(raw_url)  # 🔥 вот здесь магия
         if url:
             photos.append(InputMediaPhoto(media=url))
 
