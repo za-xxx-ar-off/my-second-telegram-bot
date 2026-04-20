@@ -176,11 +176,12 @@ async def send_page(update: Update, context: ContextTypes.DEFAULT_TYPE, next_pag
 
     user_data["idx"] = idx
 
-    if len(photos) == 1:
-        await update.message.reply_photo(photos[0].media, reply_markup=get_pager_kb(lang))
+   for i, photo in enumerate(photos):
+    # только на последнем фото показываем кнопки
+    if i == len(photos) - 1:
+        await update.message.reply_photo(photo.media, reply_markup=get_pager_kb(lang))
     else:
-        await update.message.reply_media_group(photos)
-        await update.message.reply_text(t["next"], reply_markup=get_pager_kb(lang))
+        await update.message.reply_photo(photo.media)
 
 
 # ===== WEBHOOK =====
