@@ -22,7 +22,7 @@ gc = gspread.service_account_from_dict(creds)
 sh = gc.open_by_key(SHEET_ID)
 ws = sh.sheet1
 
-# ===== 🔥 ВАЖНО: КОНВЕРТАЦИЯ GOOGLE DRIVE ССЫЛОК =====
+# ===== КОНВЕРТАЦИЯ GOOGLE DRIVE =====
 def convert_drive_url(url: str) -> str:
     if "drive.google.com" in url:
         try:
@@ -95,49 +95,41 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     user_data = context.user_data
 
-    # выбор языка
     if text == "Русский 🇷🇺":
         user_data.clear()
         user_data["lang"] = "ru"
-        t = TEXTS["ru"]
-        await update.message.reply_text(t["menu"], reply_markup=get_main_kb("ru"))
+        await update.message.reply_text(TEXTS["ru"]["menu"], reply_markup=get_main_kb("ru"))
         return
 
     if text == "Узбекский 🇺🇿":
         user_data.clear()
         user_data["lang"] = "uz"
-        t = TEXTS["uz"]
-        await update.message.reply_text(t["menu"], reply_markup=get_main_kb("uz"))
+        await update.message.reply_text(TEXTS["uz"]["menu"], reply_markup=get_main_kb("uz"))
         return
 
     lang = get_lang(user_data)
     t = TEXTS[lang]
 
-    # каталог
     if text == t["catalog"]:
         user_data["col"] = "A"
         user_data["idx"] = 1
         await send_page(update, context)
         return
 
-    # связаться
     if text == t["contact"]:
         val = ws.acell("B1").value or t["no_contacts"]
         await update.message.reply_text(val, reply_markup=get_main_kb(lang))
         return
 
-    # местоположение
     if text == t["location"]:
         val = ws.acell("C1").value or t["no_address"]
         await update.message.reply_text(val, reply_markup=get_main_kb(lang))
         return
 
-    # еще / yana
     if text == t["more"]:
         await send_page(update, context, next_page=True)
         return
 
-    # назад / orqaga
     if text == t["back"]:
         await update.message.reply_text(t["menu"], reply_markup=get_main_kb(lang))
         return
@@ -166,7 +158,7 @@ async def send_page(update: Update, context: ContextTypes.DEFAULT_TYPE, next_pag
     photos = []
     for i in range(idx - 1, min(idx - 1 + 10, len(values))):
         raw_url = values[i].strip()
-        url = convert_drive_url(raw_url)  # 🔥 вот здесь магия
+        url = convert_drive_url(raw_url)
         if url:
             photos.append(InputMediaPhoto(media=url))
 
@@ -176,12 +168,14 @@ async def send_page(update: Update, context: ContextTypes.DEFAULT_TYPE, next_pag
 
     user_data["idx"] = idx
 
-   for i, photo in enumerate(photos):
-    # только на последнем фото показываем кнопки
-    if i == len(photos) - 1:
-        await update.message.reply_photo(photo.media, reply_markup=get_pager_kb(lang))
-    else:
-        await update.message.reply_photo(photo.media)
+    # ✅ ОТПРАВКА ПО ОДНОМУ
+    for i, photo in enumerate(photos):
+        if i == len(photos) - 1:
+            await update.message.reply_photo(photo.media, reply_markup=get_pager_kb(lang))
+        else:
+            await update.message.reply_photo(photo.media)
+
+        await asyncio.sleep(0.2)
 
 
 # ===== WEBHOOK =====
