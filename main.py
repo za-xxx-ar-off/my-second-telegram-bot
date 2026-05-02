@@ -46,7 +46,12 @@ TEXTS = {
         "no_photo": "Больше нет фото",
         "no_contacts": "Нет контактов",
         "no_address": "Нет адреса",
-        "choose_btn": "Выберите кнопку"
+        "choose_btn": "Выберите кнопку",
+
+        "kitchen": "Кухонные гарнитуры",
+        "bedroom": "Спальни",
+        "other": "Остальная мебель",
+        "video": "Видео"
     },
     "uz": {
         "choose_lang": "Tilni tanlang",
@@ -60,7 +65,12 @@ TEXTS = {
         "no_photo": "Boshqa rasm yo‘q",
         "no_contacts": "Kontakt yo‘q",
         "no_address": "Manzil yo‘q",
-        "choose_btn": "Tugmani tanlang"
+        "choose_btn": "Tugmani tanlang",
+
+        "kitchen": "Oshxona garniturlari",
+        "bedroom": "Yotoqxonalar",
+        "other": "Boshqa mebellar",
+        "video": "Video"
     }
 }
 
@@ -69,6 +79,17 @@ def get_main_kb(lang):
     t = TEXTS[lang]
     return ReplyKeyboardMarkup(
         [[KeyboardButton(t["catalog"]), KeyboardButton(t["contact"]), KeyboardButton(t["location"])]],
+        resize_keyboard=True
+    )
+
+def get_catalog_kb(lang):
+    t = TEXTS[lang]
+    return ReplyKeyboardMarkup(
+        [
+            [KeyboardButton(t["kitchen"]), KeyboardButton(t["bedroom"])],
+            [KeyboardButton(t["other"]), KeyboardButton(t["video"])],
+            [KeyboardButton(t["back"])]
+        ],
         resize_keyboard=True
     )
 
@@ -95,6 +116,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     user_data = context.user_data
 
+    # выбор языка
     if text == "Русский 🇷🇺":
         user_data.clear()
         user_data["lang"] = "ru"
@@ -110,26 +132,57 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = get_lang(user_data)
     t = TEXTS[lang]
 
+    # ===== КАТАЛОГ =====
     if text == t["catalog"]:
+        await update.message.reply_text(t["catalog"], reply_markup=get_catalog_kb(lang))
+        return
+
+    # A столбец
+    if text == t["kitchen"]:
         user_data["col"] = "A"
         user_data["idx"] = 1
         await send_page(update, context)
         return
 
+    # B столбец
+    if text == t["bedroom"]:
+        user_data["col"] = "B"
+        user_data["idx"] = 1
+        await send_page(update, context)
+        return
+
+    # C столбец
+    if text == t["other"]:
+        user_data["col"] = "C"
+        user_data["idx"] = 1
+        await send_page(update, context)
+        return
+
+    # D столбец
+    if text == t["video"]:
+        user_data["col"] = "D"
+        user_data["idx"] = 1
+        await send_page(update, context)
+        return
+
+    # ===== КОНТАКТЫ =====
     if text == t["contact"]:
-        val = ws.acell("B1").value or t["no_contacts"]
+        val = ws.acell("E1").value or t["no_contacts"]
         await update.message.reply_text(val, reply_markup=get_main_kb(lang))
         return
 
+    # ===== ГЕОЛОКАЦИЯ =====
     if text == t["location"]:
-        val = ws.acell("C1").value or t["no_address"]
+        val = ws.acell("F1").value or t["no_address"]
         await update.message.reply_text(val, reply_markup=get_main_kb(lang))
         return
 
+    # ===== ЕЩЕ =====
     if text == t["more"]:
         await send_page(update, context, next_page=True)
         return
 
+    # ===== НАЗАД =====
     if text == t["back"]:
         await update.message.reply_text(t["menu"], reply_markup=get_main_kb(lang))
         return
@@ -145,7 +198,7 @@ async def send_page(update: Update, context: ContextTypes.DEFAULT_TYPE, next_pag
     col = user_data.get("col")
 
     if not col:
-        await update.message.reply_text(t["catalog"], reply_markup=get_main_kb(lang))
+        await update.message.reply_text(t["catalog"], reply_markup=get_catalog_kb(lang))
         return
 
     idx = user_data.get("idx", 1)
@@ -163,12 +216,11 @@ async def send_page(update: Update, context: ContextTypes.DEFAULT_TYPE, next_pag
             photos.append(InputMediaPhoto(media=url))
 
     if not photos:
-        await update.message.reply_text(t["no_photo"], reply_markup=get_main_kb(lang))
+        await update.message.reply_text(t["no_photo"], reply_markup=get_catalog_kb(lang))
         return
 
     user_data["idx"] = idx
 
-    # ✅ ОТПРАВКА ПО ОДНОМУ
     for i, photo in enumerate(photos):
         if i == len(photos) - 1:
             await update.message.reply_photo(photo.media, reply_markup=get_pager_kb(lang))
