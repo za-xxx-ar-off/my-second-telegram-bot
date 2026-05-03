@@ -22,7 +22,7 @@ gc = gspread.service_account_from_dict(creds)
 sh = gc.open_by_key(SHEET_ID)
 ws = sh.sheet1
 
-# ===== GOOGLE DRIVE LINK =====
+# ===== GOOGLE DRIVE =====
 def convert_drive_url(url: str) -> str:
     if "drive.google.com" in url:
         try:
@@ -40,10 +40,10 @@ TEXTS = {
         "catalog": "Каталог",
         "contact": "Связаться",
         "location": "Местоположение",
-        "more": "еще",
+        "more": "Еще",
         "back": "Назад",
-        "next": "Дальше?",
-        "no_photo": "Фото закончились, выбрать другую категорию?",
+        "next": "Еще или Назад?",
+        "finished": "Фото закончились, выбрать другую категорию?",
         "no_contacts": "Нет контактов",
         "no_address": "Нет адреса",
         "choose_btn": "Выберите кнопку",
@@ -63,10 +63,10 @@ TEXTS = {
         "catalog": "Katalog",
         "contact": "Bog‘lanish",
         "location": "Joylashuv",
-        "more": "yana",
-        "back": "orqaga",
-        "next": "Davom etamizmi?",
-        "no_photo": "Rasmlar tugadi, boshqa bo‘lim tanlaysizmi?",
+        "more": "Yana",
+        "back": "Orqaga",
+        "next": "Yana yoki Orqaga?",
+        "finished": "Rasmlar tugadi, boshqa bo‘lim tanlaysizmi?",
         "no_contacts": "Kontakt yo‘q",
         "no_address": "Manzil yo‘q",
         "choose_btn": "Tugmani tanlang",
@@ -128,12 +128,11 @@ def get_lang(user_data):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Выберите язык", reply_markup=LANG_KB)
 
-# ===== MAIN TEXT HANDLER =====
+# ===== TEXT HANDLER =====
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     user_data = context.user_data
 
-    # язык
     if text == "Русский 🇷🇺":
         user_data.clear()
         user_data["lang"] = "ru"
@@ -149,7 +148,6 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = get_lang(user_data)
     t = TEXTS[lang]
 
-    # да / нет
     if text == t["yes"]:
         await update.message.reply_text(t["catalog"], reply_markup=get_catalog_kb(lang))
         return
@@ -158,72 +156,48 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(t["menu"], reply_markup=get_main_kb(lang))
         return
 
-    # каталог
     if text == t["catalog"]:
         await update.message.reply_text(t["catalog"], reply_markup=get_catalog_kb(lang))
         return
 
     # категории
-    if text == t["kitchen"]:
-        user_data["col"] = "A"
-        user_data["type"] = "photo"
+    categories = {
+        t["kitchen"]: ("A", "photo"),
+        t["bedroom"]: ("B", "photo"),
+        t["other"]: ("C", "photo"),
+        t["video"]: ("D", "video"),
+        t["soft"]: ("E", "photo")
+    }
+
+    if text in categories:
+        col, mtype = categories[text]
+        user_data["col"] = col
+        user_data["type"] = mtype
         user_data["idx"] = 1
         await send_page(update, context)
         return
 
-    if text == t["bedroom"]:
-        user_data["col"] = "B"
-        user_data["type"] = "photo"
-        user_data["idx"] = 1
-        await send_page(update, context)
-        return
-
-    if text == t["other"]:
-        user_data["col"] = "C"
-        user_data["type"] = "photo"
-        user_data["idx"] = 1
-        await send_page(update, context)
-        return
-
-    if text == t["video"]:
-        user_data["col"] = "D"
-        user_data["type"] = "video"
-        user_data["idx"] = 1
-        await send_page(update, context)
-        return
-
-    if text == t["soft"]:
-        user_data["col"] = "E"
-        user_data["type"] = "photo"
-        user_data["idx"] = 1
-        await send_page(update, context)
-        return
-
-    # контакты
     if text == t["contact"]:
         val = ws.acell("F1").value or t["no_contacts"]
         await update.message.reply_text(val, reply_markup=get_main_kb(lang))
         return
 
-    # локация
     if text == t["location"]:
         val = ws.acell("G1").value or t["no_address"]
         await update.message.reply_text(val, reply_markup=get_main_kb(lang))
         return
 
-    # ещё
     if text == t["more"]:
         await send_page(update, context, next_page=True)
         return
 
-    # назад
     if text == t["back"]:
         await update.message.reply_text(t["menu"], reply_markup=get_main_kb(lang))
         return
 
     await update.message.reply_text(t["choose_btn"], reply_markup=get_main_kb(lang))
 
-# ===== SEND PAGE =====
+# ===== ОТПРАВКА =====
 async def send_page(update: Update, context: ContextTypes.DEFAULT_TYPE, next_page=False):
     user_data = context.user_data
     lang = get_lang(user_data)
@@ -245,31 +219,30 @@ async def send_page(update: Update, context: ContextTypes.DEFAULT_TYPE, next_pag
 
     items = []
     for i in range(idx - 1, min(idx - 1 + 10, len(values))):
-        raw_url = values[i].strip()
-        if raw_url:
-            items.append(convert_drive_url(raw_url))
+        val = values[i].strip()
+        if val:
+            items.append(convert_drive_url(val))
 
     if not items:
-        await update.message.reply_text(t["no_photo"], reply_markup=get_yesno_kb(lang))
+        await update.message.reply_text(t["finished"], reply_markup=get_yesno_kb(lang))
         return
 
     user_data["idx"] = idx
 
-    for i, url in enumerate(items):
-        last = i == len(items) - 1
-
+    # отправка 10 штук максимум
+    for url in items:
         if media_type == "video":
-            if last:
-                await update.message.reply_video(url, reply_markup=get_pager_kb(lang))
-            else:
-                await update.message.reply_video(url)
+            await update.message.reply_video(url)
         else:
-            if last:
-                await update.message.reply_photo(url, reply_markup=get_pager_kb(lang))
-            else:
-                await update.message.reply_photo(url)
+            await update.message.reply_photo(url)
 
         await asyncio.sleep(0.3)
+
+    # если после этих 10 ещё есть файлы -> Еще/Назад
+    if idx + 10 <= len(values):
+        await update.message.reply_text(t["next"], reply_markup=get_pager_kb(lang))
+    else:
+        await update.message.reply_text(t["finished"], reply_markup=get_yesno_kb(lang))
 
 # ===== WEBHOOK =====
 async def handle(request):
