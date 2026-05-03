@@ -5,7 +5,7 @@ import asyncio
 import gspread
 from aiohttp import web
 
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InputMediaPhoto
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
 
 logging.basicConfig(level=logging.INFO)
@@ -22,12 +22,12 @@ gc = gspread.service_account_from_dict(creds)
 sh = gc.open_by_key(SHEET_ID)
 ws = sh.sheet1
 
-# ===== КОНВЕРТАЦИЯ GOOGLE DRIVE =====
+# ===== GOOGLE DRIVE LINK =====
 def convert_drive_url(url: str) -> str:
     if "drive.google.com" in url:
         try:
             file_id = url.split("/d/")[1].split("/")[0]
-            return f"https://drive.google.com/uc?export=view&id={file_id}"
+            return f"https://drive.google.com/uc?export=download&id={file_id}"
         except:
             return url
     return url
@@ -56,6 +56,7 @@ TEXTS = {
         "soft": "Мягкая мебель",
         "video": "Видео"
     },
+
     "uz": {
         "choose_lang": "Tilni tanlang",
         "menu": "Qanday yordam bera olaman?",
@@ -119,17 +120,20 @@ LANG_KB = ReplyKeyboardMarkup(
     resize_keyboard=True
 )
 
-# ===== ЛОГИКА =====
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Выберите язык", reply_markup=LANG_KB)
-
+# ===== HELPERS =====
 def get_lang(user_data):
     return user_data.get("lang", "ru")
 
+# ===== START =====
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Выберите язык", reply_markup=LANG_KB)
+
+# ===== MAIN TEXT HANDLER =====
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     user_data = context.user_data
 
+    # язык
     if text == "Русский 🇷🇺":
         user_data.clear()
         user_data["lang"] = "ru"
@@ -145,7 +149,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = get_lang(user_data)
     t = TEXTS[lang]
 
-    # да / нет после конца фото
+    # да / нет
     if text == t["yes"]:
         await update.message.reply_text(t["catalog"], reply_markup=get_catalog_kb(lang))
         return
@@ -159,33 +163,38 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(t["catalog"], reply_markup=get_catalog_kb(lang))
         return
 
-    # разделы
+    # категории
     if text == t["kitchen"]:
         user_data["col"] = "A"
+        user_data["type"] = "photo"
         user_data["idx"] = 1
         await send_page(update, context)
         return
 
     if text == t["bedroom"]:
         user_data["col"] = "B"
+        user_data["type"] = "photo"
         user_data["idx"] = 1
         await send_page(update, context)
         return
 
     if text == t["other"]:
         user_data["col"] = "C"
+        user_data["type"] = "photo"
         user_data["idx"] = 1
         await send_page(update, context)
         return
 
     if text == t["video"]:
         user_data["col"] = "D"
+        user_data["type"] = "video"
         user_data["idx"] = 1
         await send_page(update, context)
         return
 
     if text == t["soft"]:
         user_data["col"] = "E"
+        user_data["type"] = "photo"
         user_data["idx"] = 1
         await send_page(update, context)
         return
@@ -196,13 +205,13 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(val, reply_markup=get_main_kb(lang))
         return
 
-    # гео
+    # локация
     if text == t["location"]:
         val = ws.acell("G1").value or t["no_address"]
         await update.message.reply_text(val, reply_markup=get_main_kb(lang))
         return
 
-    # еще
+    # ещё
     if text == t["more"]:
         await send_page(update, context, next_page=True)
         return
@@ -214,13 +223,14 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(t["choose_btn"], reply_markup=get_main_kb(lang))
 
-
+# ===== SEND PAGE =====
 async def send_page(update: Update, context: ContextTypes.DEFAULT_TYPE, next_page=False):
     user_data = context.user_data
     lang = get_lang(user_data)
     t = TEXTS[lang]
 
     col = user_data.get("col")
+    media_type = user_data.get("type", "photo")
 
     if not col:
         await update.message.reply_text(t["catalog"], reply_markup=get_catalog_kb(lang))
@@ -233,27 +243,33 @@ async def send_page(update: Update, context: ContextTypes.DEFAULT_TYPE, next_pag
 
     values = ws.col_values(ord(col) - ord("A") + 1)
 
-    photos = []
+    items = []
     for i in range(idx - 1, min(idx - 1 + 10, len(values))):
         raw_url = values[i].strip()
-        url = convert_drive_url(raw_url)
-        if url:
-            photos.append(InputMediaPhoto(media=url))
+        if raw_url:
+            items.append(convert_drive_url(raw_url))
 
-    if not photos:
+    if not items:
         await update.message.reply_text(t["no_photo"], reply_markup=get_yesno_kb(lang))
         return
 
     user_data["idx"] = idx
 
-    for i, photo in enumerate(photos):
-        if i == len(photos) - 1:
-            await update.message.reply_photo(photo.media, reply_markup=get_pager_kb(lang))
+    for i, url in enumerate(items):
+        last = i == len(items) - 1
+
+        if media_type == "video":
+            if last:
+                await update.message.reply_video(url, reply_markup=get_pager_kb(lang))
+            else:
+                await update.message.reply_video(url)
         else:
-            await update.message.reply_photo(photo.media)
+            if last:
+                await update.message.reply_photo(url, reply_markup=get_pager_kb(lang))
+            else:
+                await update.message.reply_photo(url)
 
-        await asyncio.sleep(0.2)
-
+        await asyncio.sleep(0.3)
 
 # ===== WEBHOOK =====
 async def handle(request):
@@ -262,7 +278,7 @@ async def handle(request):
     await request.app["app"].process_update(update)
     return web.Response()
 
-
+# ===== MAIN =====
 async def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
@@ -293,7 +309,6 @@ async def main():
 
     while True:
         await asyncio.sleep(3600)
-
 
 if __name__ == "__main__":
     asyncio.run(main())
