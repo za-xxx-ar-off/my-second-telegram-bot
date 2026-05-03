@@ -43,14 +43,17 @@ TEXTS = {
         "more": "еще",
         "back": "Назад",
         "next": "Дальше?",
-        "no_photo": "Больше нет фото",
+        "no_photo": "Фото закончились, выбрать другую категорию?",
         "no_contacts": "Нет контактов",
         "no_address": "Нет адреса",
         "choose_btn": "Выберите кнопку",
+        "yes": "Да",
+        "no": "Нет",
 
         "kitchen": "Кухонные гарнитуры",
         "bedroom": "Спальни",
         "other": "Остальная мебель",
+        "soft": "Мягкая мебель",
         "video": "Видео"
     },
     "uz": {
@@ -62,14 +65,17 @@ TEXTS = {
         "more": "yana",
         "back": "orqaga",
         "next": "Davom etamizmi?",
-        "no_photo": "Boshqa rasm yo‘q",
+        "no_photo": "Rasmlar tugadi, boshqa bo‘lim tanlaysizmi?",
         "no_contacts": "Kontakt yo‘q",
         "no_address": "Manzil yo‘q",
         "choose_btn": "Tugmani tanlang",
+        "yes": "Ha",
+        "no": "Yo‘q",
 
         "kitchen": "Oshxona garniturlari",
         "bedroom": "Yotoqxonalar",
         "other": "Boshqa mebellar",
+        "soft": "Yumshoq mebel",
         "video": "Video"
     }
 }
@@ -87,7 +93,8 @@ def get_catalog_kb(lang):
     return ReplyKeyboardMarkup(
         [
             [KeyboardButton(t["kitchen"]), KeyboardButton(t["bedroom"])],
-            [KeyboardButton(t["other"]), KeyboardButton(t["video"])],
+            [KeyboardButton(t["other"]), KeyboardButton(t["soft"])],
+            [KeyboardButton(t["video"])],
             [KeyboardButton(t["back"])]
         ],
         resize_keyboard=True
@@ -97,6 +104,13 @@ def get_pager_kb(lang):
     t = TEXTS[lang]
     return ReplyKeyboardMarkup(
         [[KeyboardButton(t["more"]), KeyboardButton(t["back"])]],
+        resize_keyboard=True
+    )
+
+def get_yesno_kb(lang):
+    t = TEXTS[lang]
+    return ReplyKeyboardMarkup(
+        [[KeyboardButton(t["yes"]), KeyboardButton(t["no"])]],
         resize_keyboard=True
     )
 
@@ -116,7 +130,6 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     user_data = context.user_data
 
-    # выбор языка
     if text == "Русский 🇷🇺":
         user_data.clear()
         user_data["lang"] = "ru"
@@ -132,57 +145,69 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = get_lang(user_data)
     t = TEXTS[lang]
 
-    # ===== КАТАЛОГ =====
+    # да / нет после конца фото
+    if text == t["yes"]:
+        await update.message.reply_text(t["catalog"], reply_markup=get_catalog_kb(lang))
+        return
+
+    if text == t["no"]:
+        await update.message.reply_text(t["menu"], reply_markup=get_main_kb(lang))
+        return
+
+    # каталог
     if text == t["catalog"]:
         await update.message.reply_text(t["catalog"], reply_markup=get_catalog_kb(lang))
         return
 
-    # A столбец
+    # разделы
     if text == t["kitchen"]:
         user_data["col"] = "A"
         user_data["idx"] = 1
         await send_page(update, context)
         return
 
-    # B столбец
     if text == t["bedroom"]:
         user_data["col"] = "B"
         user_data["idx"] = 1
         await send_page(update, context)
         return
 
-    # C столбец
     if text == t["other"]:
         user_data["col"] = "C"
         user_data["idx"] = 1
         await send_page(update, context)
         return
 
-    # D столбец
     if text == t["video"]:
         user_data["col"] = "D"
         user_data["idx"] = 1
         await send_page(update, context)
         return
 
-    # ===== КОНТАКТЫ =====
+    if text == t["soft"]:
+        user_data["col"] = "E"
+        user_data["idx"] = 1
+        await send_page(update, context)
+        return
+
+    # контакты
     if text == t["contact"]:
-        val = ws.acell("E1").value or t["no_contacts"]
+        val = ws.acell("F1").value or t["no_contacts"]
         await update.message.reply_text(val, reply_markup=get_main_kb(lang))
         return
 
-    # ===== ГЕОЛОКАЦИЯ =====
+    # гео
     if text == t["location"]:
-        val = ws.acell("F1").value or t["no_address"]
+        val = ws.acell("G1").value or t["no_address"]
         await update.message.reply_text(val, reply_markup=get_main_kb(lang))
         return
 
-    # ===== ЕЩЕ =====
+    # еще
     if text == t["more"]:
         await send_page(update, context, next_page=True)
         return
 
-    # ===== НАЗАД =====
+    # назад
     if text == t["back"]:
         await update.message.reply_text(t["menu"], reply_markup=get_main_kb(lang))
         return
@@ -216,7 +241,7 @@ async def send_page(update: Update, context: ContextTypes.DEFAULT_TYPE, next_pag
             photos.append(InputMediaPhoto(media=url))
 
     if not photos:
-        await update.message.reply_text(t["no_photo"], reply_markup=get_catalog_kb(lang))
+        await update.message.reply_text(t["no_photo"], reply_markup=get_yesno_kb(lang))
         return
 
     user_data["idx"] = idx
