@@ -5,7 +5,7 @@ import asyncio
 import gspread
 from aiohttp import web
 
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
 
 logging.basicConfig(level=logging.INFO)
@@ -23,7 +23,7 @@ sh = gc.open_by_key(SHEET_ID)
 ws = sh.sheet1
 
 # ===== CACHE =====
-CACHE = {}  # url -> telegram file_id
+CACHE = {}
 
 # ===== GOOGLE DRIVE =====
 def convert_drive_url(url: str) -> str:
@@ -80,7 +80,7 @@ TEXTS = {
     }
 }
 
-# ===== BUTTONS =====
+# ===== KEYBOARDS =====
 def kb_main(lang):
     t = TEXTS[lang]
     return ReplyKeyboardMarkup([[t["catalog"], t["contact"], t["location"]]], resize_keyboard=True)
@@ -102,26 +102,30 @@ def kb_yesno(lang):
     t = TEXTS[lang]
     return ReplyKeyboardMarkup([[t["yes"], t["no"]]], resize_keyboard=True)
 
-# ===== HANDLERS =====
-def get_lang(user_data):
-    return user_data.get("lang", "ru")
+def get_lang(u):
+    return u.get("lang", "ru")
 
+# ===== START =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Выберите язык",
-        reply_markup=ReplyKeyboardMarkup([["Узбекский 🇺🇿","Русский 🇷🇺"]], resize_keyboard=True)
+    await update.message.reply_text(
+        "Выберите язык",
+        reply_markup=ReplyKeyboardMarkup([["Узбекский 🇺🇿", "Русский 🇷🇺"]], resize_keyboard=True)
     )
 
+# ===== HANDLER =====
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     u = context.user_data
 
     if text == "Русский 🇷🇺":
-        u.clear(); u["lang"]="ru"
+        u.clear()
+        u["lang"] = "ru"
         await update.message.reply_text(TEXTS["ru"]["menu"], reply_markup=kb_main("ru"))
         return
 
     if text == "Узбекский 🇺🇿":
-        u.clear(); u["lang"]="uz"
+        u.clear()
+        u["lang"] = "uz"
         await update.message.reply_text(TEXTS["uz"]["menu"], reply_markup=kb_main("uz"))
         return
 
@@ -156,20 +160,19 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send_page(update, context, True)
         return
 
-    # категории
     mapping = {
-        t["kitchen"]: ("A","photo"),
-        t["bedroom"]: ("B","photo"),
-        t["other"]: ("C","photo"),
-        t["video"]: ("D","video"),
-        t["soft"]: ("E","photo"),
+        t["kitchen"]: ("A", "photo"),
+        t["bedroom"]: ("B", "photo"),
+        t["other"]: ("C", "photo"),
+        t["video"]: ("D", "video"),
+        t["soft"]: ("E", "photo"),
     }
 
     if text in mapping:
         col, typ = mapping[text]
-        u["col"]=col
-        u["type"]=typ
-        u["idx"]=1
+        u["col"] = col
+        u["type"] = typ
+        u["idx"] = 1
         await send_page(update, context)
         return
 
@@ -197,16 +200,16 @@ async def send_page(update: Update, context: ContextTypes.DEFAULT_TYPE, next_pag
     t = TEXTS[lang]
 
     col = u.get("col")
-    typ = u.get("type","photo")
+    typ = u.get("type", "photo")
 
-    idx = u.get("idx",1)
+    idx = u.get("idx", 1)
     if next_page:
         idx += 10
 
-    values = ws.col_values(ord(col)-64)
+    values = ws.col_values(ord(col) - 64)
 
     items = []
-    for i in range(idx-1, min(idx+9, len(values))):
+    for i in range(idx - 1, min(idx + 9, len(values))):
         url = convert_drive_url(values[i].strip())
         if url:
             items.append(url)
@@ -217,6 +220,9 @@ async def send_page(update: Update, context: ContextTypes.DEFAULT_TYPE, next_pag
 
     u["idx"] = idx
 
+    # 🔥 УБИРАЕМ КЛАВИАТУРУ
+    await update.message.reply_text("...", reply_markup=ReplyKeyboardRemove())
+
     for url in items:
         try:
             if typ == "video":
@@ -224,11 +230,12 @@ async def send_page(update: Update, context: ContextTypes.DEFAULT_TYPE, next_pag
             else:
                 await send_cached(context.bot.send_photo, update.effective_chat.id, url)
 
-            await asyncio.sleep(0.2)
+            await asyncio.sleep(0.3)
 
         except Exception as e:
             print("ERROR:", e)
 
+    # 🔥 ПОСЛЕ 10 ШТУК ПОКАЗЫВАЕМ КНОПКИ
     if idx + 10 <= len(values):
         await update.message.reply_text(t["next"], reply_markup=kb_more(lang))
     else:
@@ -241,6 +248,7 @@ async def handle(request):
     await request.app["app"].process_update(update)
     return web.Response()
 
+# ===== MAIN =====
 async def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
