@@ -6,6 +6,7 @@ import gspread
 from datetime import datetime
 from aiohttp import web
 import io
+import traceback
 
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -212,4 +213,9 @@ async def main():
         await asyncio.sleep(3600)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except Exception:
+        import traceback
+        print("🔥 FATAL ERROR:")
+        traceback.print_exc()
