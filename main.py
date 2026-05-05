@@ -11,6 +11,7 @@ import io
 
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
+print("BOT STARTING...")
 
 logging.basicConfig(level=logging.INFO)
 
