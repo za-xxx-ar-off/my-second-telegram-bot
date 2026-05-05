@@ -5,12 +5,15 @@ import logging
 import gspread
 from datetime import datetime
 from aiohttp import web
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseUpload
 import io
 
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseUpload
+
+from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
+
 print("BOT STARTING...")
 
 logging.basicConfig(level=logging.INFO)
@@ -38,31 +41,20 @@ FOLDERS = {
 }
 
 # ===== GOOGLE SHEETS =====
-creds = json.loads(SERVICE_ACCOUNT_JSON)
-gc = gspread.service_account_from_dict(creds)
+creds_dict = json.loads(SERVICE_ACCOUNT_JSON)
+
+gc = gspread.service_account_from_dict(creds_dict)
 sh = gc.open_by_key(SHEET_ID)
 ws = sh.sheet1
 
-# ===== DRIVE API =====
-drive_service = build('drive', 'v3', credentials=gspread.service_account_from_dict(creds).auth)
+# ===== GOOGLE DRIVE AUTH FIX =====
+SCOPES = ["https://www.googleapis.com/auth/drive"]
+credentials = service_account.Credentials.from_service_account_info(
+    creds_dict,
+    scopes=SCOPES
+)
 
-# ===== TEXTS =====
-TEXTS = {
-    "ru": {
-        "menu": "Меню",
-        "catalog": "Каталог",
-        "contact": "Связаться",
-        "location": "Местоположение",
-        "admin": "Админ панель",
-        "back": "Назад",
-
-        "kitchen": "Кухонные гарнитуры",
-        "bedroom": "Спальни",
-        "other": "Остальная мебель",
-        "soft": "Мягкая мебель",
-        "video": "Видео"
-    }
-}
+drive_service = build("drive", "v3", credentials=credentials)
 
 # ===== KEYBOARDS =====
 def kb_main(admin=False):
@@ -79,7 +71,7 @@ def kb_admin():
         ["Назад"]
     ], resize_keyboard=True)
 
-# ===== LOG TO SHEET J =====
+# ===== LOG =====
 def write_log(update, category, file_type):
     user = update.effective_user
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -87,26 +79,28 @@ def write_log(update, category, file_type):
     username = f"@{user.username}" if user.username else "no_username"
     text = f"{now} | {username} ({user.id}) | {category} | {file_type}"
 
-    col_index = 10  # J
-    next_row = len(ws.col_values(col_index)) + 1
-    ws.update_cell(next_row, col_index, text)
+    ws.update_cell(len(ws.col_values(10)) + 1, 10, text)  # column J
 
-# ===== UPLOAD TO DRIVE =====
+# ===== DRIVE UPLOAD =====
 def upload_to_drive(file_bytes, filename, mime_type, folder_id):
-    file_metadata = {'name': filename, 'parents': [folder_id]}
+    file_metadata = {
+        "name": filename,
+        "parents": [folder_id]
+    }
+
     media = MediaIoBaseUpload(io.BytesIO(file_bytes), mimetype=mime_type)
 
     file = drive_service.files().create(
         body=file_metadata,
         media_body=media,
-        fields='id'
+        fields="id"
     ).execute()
 
-    file_id = file.get('id')
+    file_id = file.get("id")
 
     drive_service.permissions().create(
         fileId=file_id,
-        body={'type': 'anyone', 'role': 'reader'}
+        body={"type": "anyone", "role": "reader"}
     ).execute()
 
     return f"https://drive.google.com/file/d/{file_id}/view"
@@ -115,7 +109,7 @@ def upload_to_drive(file_bytes, filename, mime_type, folder_id):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Меню", reply_markup=kb_main(is_admin(update)))
 
-# ===== TEXT HANDLER =====
+# ===== TEXT =====
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     u = context.user_data
@@ -141,10 +135,10 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if text in mapping:
             u["col"] = mapping[text]
-            await update.message.reply_text("Отправьте файл")
+            await update.message.reply_text("Отправьте фото или видео")
             return
 
-# ===== MEDIA HANDLER =====
+# ===== MEDIA =====
 async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     u = context.user_data
 
@@ -155,30 +149,30 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not col:
         return
 
-    file = None
+    folder_id = FOLDERS.get(col)
+
+    file_obj = None
     mime = "image/jpeg"
     file_type = "photo"
 
     if update.message.photo:
-        file = await update.message.photo[-1].get_file()
+        file_obj = await update.message.photo[-1].get_file()
     elif update.message.video:
-        file = await update.message.video.get_file()
+        file_obj = await update.message.video.get_file()
         mime = "video/mp4"
         file_type = "video"
     else:
         return
 
-    data = await file.download_as_bytearray()
-
-    folder_id = FOLDERS.get(col)
+    data = await file_obj.download_as_bytearray()
 
     link = upload_to_drive(data, "file", mime, folder_id)
 
-    # ===== WRITE TO SHEET =====
+    # write to sheet
     col_index = ord(col) - 64
     ws.update_cell(len(ws.col_values(col_index)) + 1, col_index, link)
 
-    # ===== LOG =====
+    # log
     write_log(update, col, file_type)
 
     await update.message.reply_text("Загружено")
@@ -211,6 +205,8 @@ async def main():
     runner = web.AppRunner(aio)
     await runner.setup()
     await web.TCPSite(runner, "0.0.0.0", PORT).start()
+
+    print("SERVER RUNNING")
 
     while True:
         await asyncio.sleep(3600)
