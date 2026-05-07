@@ -8,7 +8,7 @@ from datetime import datetime
 from aiohttp import web
 from google.oauth2.service_account import Credentials
 
-from telegram import Update, ReplyKeyboardMarkup
+from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -18,7 +18,6 @@ from telegram.ext import (
 )
 
 logging.basicConfig(level=logging.INFO)
-
 print("BOT STARTING...")
 
 # ================= ENV =================
@@ -33,6 +32,9 @@ ADMIN_IDS = [
     int(x) for x in os.environ.get("ADMIN_IDS", "").split(",") if x.strip()
 ]
 
+if not all([BOT_TOKEN, SHEET_ID, SERVICE_ACCOUNT_JSON, WEBHOOK_URL]):
+    raise ValueError("Missing ENV variables")
+
 # ================= GOOGLE SHEETS =================
 
 creds_dict = json.loads(SERVICE_ACCOUNT_JSON)
@@ -45,34 +47,14 @@ credentials = Credentials.from_service_account_info(
 gc = gspread.authorize(credentials)
 ws = gc.open_by_key(SHEET_ID).sheet1
 
-# ================= TEXTS =================
-
-TEXTS = {
-    "ru": {
-        "menu": "Меню",
-        "catalog": "Каталог",
-        "contact": "Связаться",
-        "location": "Локация",
-        "admin": "Админ панель",
-        "back": "Назад",
-        "upload_ok": "Загружено"
-    }
-}
-
-# ================= HELPERS =================
+# ================= STATE HELPERS =================
 
 def is_admin(update):
     return update.effective_user.id in ADMIN_IDS
 
-def log(update, category, file_type):
-    user = update.effective_user
-    now = datetime.now().strftime("%Y-%m-%d %H:%M")
-
-    username = f"@{user.username}" if user.username else "no_username"
-    text = f"{now} | {username} ({user.id}) | {category} | {file_type}"
-
-    next_row = len(ws.col_values(10)) + 1
-    ws.update_cell(next_row, 10, text)
+def reset_user(u):
+    u.clear()
+    u["mode"] = "client"
 
 # ================= KEYBOARDS =================
 
@@ -98,10 +80,23 @@ def kb_admin():
         ["Назад"]
     ], resize_keyboard=True)
 
+# ================= LOG =================
+
+def log(update, category, file_type):
+    user = update.effective_user
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    username = f"@{user.username}" if user.username else "no_username"
+    text = f"{now} | {username} ({user.id}) | {category} | {file_type}"
+
+    next_row = len(ws.col_values(10)) + 1
+    ws.update_cell(next_row, 10, text)
+
 # ================= START =================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data.clear()
+    reset_user(context.user_data)
+
     await update.message.reply_text(
         "Меню",
         reply_markup=kb_main(is_admin(update))
@@ -113,49 +108,83 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     u = context.user_data
 
-    # RESET ADMIN ON /start
+    mode = u.get("mode", "client")
+
+    # RESET
     if text == "/start":
-        u.clear()
-        await start(update, context)
+        return await start(update, context)
+
+    # ================= ADMIN MODE SWITCH =================
+
+    if text == "Админ панель":
+        if is_admin(update):
+            u["mode"] = "admin"
+            await update.message.reply_text(
+                "Админ режим",
+                reply_markup=kb_admin()
+            )
         return
 
-    # ADMIN MODE ENABLE
-    if text == "Админ панель" and is_admin(update):
-        u["admin"] = True
-        await update.message.reply_text("Админ режим", reply_markup=kb_admin())
-        return
+    # ================= BACK =================
 
-    # BACK
     if text == "Назад":
-        u["admin"] = False
-        await update.message.reply_text("Меню", reply_markup=kb_main(is_admin(update)))
+        reset_user(u)
+        await update.message.reply_text(
+            "Меню",
+            reply_markup=kb_main(is_admin(update))
+        )
         return
 
-    # CATALOG
-    if text == "Каталог":
-        await update.message.reply_text("Каталог", reply_markup=kb_catalog())
-        return
+    # ================= CLIENT MODE =================
 
-    # CATEGORY MAP
-    mapping = {
-        "Кухня": "A",
-        "Спальня": "B",
-        "Другое": "C",
-        "Видео": "D",
-        "Мягкая": "E"
-    }
+    if mode == "client":
 
-    if text in mapping:
-        u["col"] = mapping[text]
-        await update.message.reply_text("Отправь фото/видео")
-        return
+        if text == "Каталог":
+            await update.message.reply_text(
+                "Каталог",
+                reply_markup=kb_catalog()
+            )
+            return
+
+        mapping = {
+            "Кухня": "A",
+            "Спальня": "B",
+            "Другое": "C",
+            "Видео": "D",
+            "Мягкая": "E"
+        }
+
+        if text in mapping:
+            u["col"] = mapping[text]
+            await update.message.reply_text("Отправь фото/видео")
+            return
+
+    # ================= ADMIN MODE =================
+
+    if mode == "admin":
+
+        mapping = {
+            "Кухня": "A",
+            "Спальня": "B",
+            "Другое": "C",
+            "Видео": "D",
+            "Мягкая": "E"
+        }
+
+        if text in mapping:
+            u["col"] = mapping[text]
+            await update.message.reply_text(
+                "Отправь файл (фото или видео)",
+                reply_markup=ReplyKeyboardRemove()
+            )
+            return
 
 # ================= MEDIA HANDLER =================
 
 async def media_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     u = context.user_data
 
-    if not u.get("admin"):
+    if u.get("mode") != "admin":
         return
 
     col = u.get("col")
