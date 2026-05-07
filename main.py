@@ -326,77 +326,25 @@ async def send_cached(bot_method, chat_id, url, is_video=False):
 # SEND PAGE
 # ======================================================
 
-async def send_page(update, context, next_page=False):
-    u = context.user_data
+for i in range(idx - 1, min(idx + 9, len(values))):
+    file_id = values[i].strip()
 
-    lang = get_lang(u)
+    if not file_id:
+        continue
 
-    t = TEXTS[lang]
-
-    col = u.get("col")
-    typ = u.get("type", "photo")
-
-    idx = u.get("idx", 1)
-
-    if next_page:
-        idx += 10
-
-    values = ws.col_values(ord(col) - 64)
-
-    items = []
-
-    for i in range(idx - 1, min(idx + 9, len(values))):
-        url = values[i].strip()
-
-        if url:
-            items.append(convert_drive_url(url))
-
-    if not items:
-        await update.message.reply_text(
-            t["finished"],
-            reply_markup=kb_yesno(lang)
-        )
-        return
-
-    u["idx"] = idx
-
-    await update.message.reply_text(
-        "...",
-        reply_markup=ReplyKeyboardRemove()
-    )
-
-    for url in items:
-        try:
-            if typ == "video":
-                await send_cached(
-                    context.bot.send_video,
-                    update.effective_chat.id,
-                    url,
-                    True
-                )
-            else:
-                await send_cached(
-                    context.bot.send_photo,
-                    update.effective_chat.id,
-                    url
-                )
-
-            await asyncio.sleep(0.3)
-
-        except Exception as e:
-            print("SEND ERROR:", e)
-
-    if idx + 10 <= len(values):
-        await update.message.reply_text(
-            t["next"],
-            reply_markup=kb_more(lang)
+    if typ == "video":
+        await send_cached(
+            context.bot.send_video,
+            update.effective_chat.id,
+            file_id,
+            True
         )
     else:
-        await update.message.reply_text(
-            t["finished"],
-            reply_markup=kb_yesno(lang)
+        await send_cached(
+            context.bot.send_photo,
+            update.effective_chat.id,
+            file_id
         )
-
 # ======================================================
 # TEXT HANDLER
 # ======================================================
@@ -547,51 +495,31 @@ async def media_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Категория не выбрана")
         return
 
-    file = None
-    mime = "image/jpeg"
-    file_type = "photo"
-
     try:
+        file_id = None
+        file_type = None
 
-        # ===== PHOTO =====
+        # PHOTO
         if update.message.photo:
-            file = await update.message.photo[-1].get_file()
+            file_id = update.message.photo[-1].file_id
+            file_type = "photo"
 
-        # ===== VIDEO =====
+        # VIDEO
         elif update.message.video:
-            file = await update.message.video.get_file()
-            mime = "video/mp4"
+            file_id = update.message.video.file_id
             file_type = "video"
 
         else:
             await update.message.reply_text("❌ Неподдерживаемый файл")
             return
 
-        # ===== DOWNLOAD FILE =====
-        data = await file.download_as_bytearray()
-
-        folder_id = FOLDERS.get(col)
-
-        if not folder_id:
-            await update.message.reply_text("❌ Folder ID not set")
-            return
-
-        # ===== UPLOAD TO DRIVE =====
-        link = upload_to_drive(
-            data,
-            f"{datetime.now().timestamp()}",
-            mime,
-            folder_id
-        )
-
-        # ===== SAVE TO SHEET =====
+        # SAVE TO SHEET
         col_index = ord(col) - 64
-
         next_row = len(ws.col_values(col_index)) + 1
 
-        ws.update_cell(next_row, col_index, link)
+        ws.update_cell(next_row, col_index, file_id)
 
-        # ===== LOG =====
+        # LOG
         write_log(update, col, file_type)
 
         lang = get_lang(u)
@@ -605,7 +533,7 @@ async def media_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         print("UPLOAD ERROR:", e)
 
         await update.message.reply_text(
-            f"❌ ERROR:\n{str(e)}",
+            f"❌ ERROR: {e}",
             reply_markup=kb_admin(get_lang(u))
         )
 
