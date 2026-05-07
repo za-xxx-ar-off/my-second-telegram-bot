@@ -3,14 +3,11 @@ import json
 import asyncio
 import logging
 import gspread
-import io
 
 from datetime import datetime
 from aiohttp import web
 
 from google.oauth2.service_account import Credentials
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseUpload
 
 from telegram import (
     Update,
