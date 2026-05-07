@@ -8,6 +8,7 @@ import io
 from datetime import datetime
 from aiohttp import web
 
+from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 
@@ -61,7 +62,7 @@ if not all([BOT_TOKEN, SHEET_ID, SERVICE_ACCOUNT_JSON, WEBHOOK_URL]):
 # GOOGLE
 # ======================================================
 
-from google.oauth2.service_account import Credentials
+creds = json.loads(SERVICE_ACCOUNT_JSON)
 
 SCOPES = [
     "https://www.googleapis.com/auth/drive",
@@ -564,9 +565,13 @@ async def media_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     folder_id = FOLDERS.get(col)
 
+    if not folder_id:
+        await update.message.reply_text("❌ Folder ID not set")
+        return
+
     link = upload_to_drive(
         data,
-        "file",
+        f"{datetime.now().timestamp()}",
         mime,
         folder_id
     )
@@ -637,6 +642,12 @@ async def main():
 
     aio.router.add_post(f"/{BOT_TOKEN}", handle)
 
+    # health check
+    async def health(request):
+        return web.Response(text="OK")
+
+    aio.router.add_get("/", health)
+
     runner = web.AppRunner(aio)
 
     await runner.setup()
@@ -655,4 +666,8 @@ async def main():
         await asyncio.sleep(3600)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except Exception as e:
+        print("🔥 FATAL ERROR:")
+        print(e)
