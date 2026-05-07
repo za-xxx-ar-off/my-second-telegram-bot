@@ -123,7 +123,12 @@ def kb_admin():
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
-    await update.message.reply_text("Меню", reply_markup=kb_main(is_admin(update)))
+    context.user_data["mode"] = "client"
+
+    await update.message.reply_text(
+        "Меню",
+        reply_markup=kb_main(is_admin(update))
+    )
 
 # ======================================================
 # TEXT HANDLER
@@ -133,13 +138,22 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     u = context.user_data
 
-    if text == "Админ" and is_admin(update):
-        u["admin"] = True
+if text == "Админ" and is_admin(update):
+    u["mode"] = "admin"
+    await update.message.reply_text("Админ режим", reply_markup=kb_admin())
+    return
         await update.message.reply_text("Админ режим", reply_markup=kb_admin())
         return
 
-    if text == "Назад":
-        u["admin"] = False
+if text == "Назад":
+    u["mode"] = "client"
+    u.pop("col", None)
+
+    await update.message.reply_text(
+        "Меню",
+        reply_markup=kb_main(is_admin(update))
+    )
+    return
         await update.message.reply_text("Меню", reply_markup=kb_main(is_admin(update)))
         return
 
@@ -163,12 +177,13 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ======================================================
 # MEDIA HANDLER (file_id ONLY)
 # ======================================================
-
+if u.get("mode") != "admin":
+    return
 async def media_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     u = context.user_data
 
-    if not u.get("admin"):
-        return
+if u.get("mode") != "admin":
+    return
 
     col = u.get("col")
     if not col:
