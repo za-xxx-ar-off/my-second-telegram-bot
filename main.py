@@ -6,16 +6,9 @@ import gspread
 
 from datetime import datetime
 from aiohttp import web
-
 from google.oauth2.service_account import Credentials
 
-from telegram import (
-    Update,
-    ReplyKeyboardMarkup,
-    KeyboardButton,
-    ReplyKeyboardRemove
-)
-
+from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -32,62 +25,34 @@ print("BOT STARTING...")
 # ENV
 # ======================================================
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
-SHEET_ID = os.environ.get("SHEET_ID")
-SERVICE_ACCOUNT_JSON = os.environ.get("SERVICE_ACCOUNT_JSON")
-WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
+BOT_TOKEN = os.environ["BOT_TOKEN"]
+SHEET_ID = os.environ["SHEET_ID"]
+SERVICE_ACCOUNT_JSON = os.environ["SERVICE_ACCOUNT_JSON"]
+WEBHOOK_URL = os.environ["WEBHOOK_URL"]
 PORT = int(os.environ.get("PORT", 10000))
 
 ADMIN_IDS = [
-    int(x) for x in os.environ.get("ADMIN_IDS", "").split(",")
-    if x.strip()
+    int(x) for x in os.environ.get("ADMIN_IDS", "").split(",") if x.strip()
 ]
-
-# DRIVE FOLDERS
-FOLDERS = {
-    "A": os.environ.get("DRIVE_FOLDER_KITCHEN"),
-    "B": os.environ.get("DRIVE_FOLDER_BEDROOM"),
-    "C": os.environ.get("DRIVE_FOLDER_OTHER"),
-    "D": os.environ.get("DRIVE_FOLDER_VIDEO"),
-    "E": os.environ.get("DRIVE_FOLDER_SOFT"),
-}
 
 if not all([BOT_TOKEN, SHEET_ID, SERVICE_ACCOUNT_JSON, WEBHOOK_URL]):
-    raise ValueError("❌ Missing ENV variables")
+    raise ValueError("Missing ENV variables")
 
 # ======================================================
-# GOOGLE
+# GOOGLE SHEETS
 # ======================================================
 
-creds = json.loads(SERVICE_ACCOUNT_JSON)
-
-SCOPES = [
-    "https://www.googleapis.com/auth/drive",
-    "https://www.googleapis.com/auth/spreadsheets"
-]
+creds_dict = json.loads(SERVICE_ACCOUNT_JSON)
 
 credentials = Credentials.from_service_account_info(
-    creds,
-    scopes=SCOPES
+    creds_dict,
+    scopes=[
+        "https://www.googleapis.com/auth/spreadsheets"
+    ]
 )
 
 gc = gspread.authorize(credentials)
-
-sh = gc.open_by_key(SHEET_ID)
-ws = sh.sheet1
-
-drive_service = build(
-    "drive",
-    "v3",
-    credentials=credentials,
-    cache_discovery=False
-)
-
-# ======================================================
-# CACHE
-# ======================================================
-
-CACHE = {}
+ws = gc.open_by_key(SHEET_ID).sheet1
 
 # ======================================================
 # TEXTS
@@ -95,57 +60,13 @@ CACHE = {}
 
 TEXTS = {
     "ru": {
-        "menu": "Чем я могу помочь?",
+        "menu": "Меню",
         "catalog": "Каталог",
         "contact": "Связаться",
-        "location": "Местоположение",
-
-        "more": "Еще",
+        "location": "Локация",
+        "admin": "Админ",
         "back": "Назад",
-
-        "next": "Еще или Назад?",
-        "finished": "Фото закончились, выбрать другую категорию?",
-
-        "yes": "Да",
-        "no": "Нет",
-
-        "admin": "Админ панель",
-
-        "upload_ok": "✅ Загружено",
-        "send_file": "Отправьте фото или видео",
-
-        "kitchen": "Кухонные гарнитуры",
-        "bedroom": "Спальни",
-        "other": "Остальная мебель",
-        "soft": "Мягкая мебель",
-        "video": "Видео"
-    },
-
-    "uz": {
-        "menu": "Qanday yordam bera olaman?",
-        "catalog": "Katalog",
-        "contact": "Bog‘lanish",
-        "location": "Joylashuv",
-
-        "more": "Yana",
-        "back": "Orqaga",
-
-        "next": "Yana yoki Orqaga?",
-        "finished": "Rasmlar tugadi, boshqa bo‘lim tanlaysizmi?",
-
-        "yes": "Ha",
-        "no": "Yo‘q",
-
-        "admin": "Admin panel",
-
-        "upload_ok": "✅ Yuklandi",
-        "send_file": "Rasm yoki video yuboring",
-
-        "kitchen": "Oshxona garniturlari",
-        "bedroom": "Yotoqxonalar",
-        "other": "Boshqa mebellar",
-        "soft": "Yumshoq mebel",
-        "video": "Video"
+        "upload_ok": "Загружено"
     }
 }
 
@@ -153,331 +74,94 @@ TEXTS = {
 # HELPERS
 # ======================================================
 
-def get_lang(user_data):
-    return user_data.get("lang", "ru")
-
+def lang(u):
+    return u.get("lang", "ru")
 
 def is_admin(update):
     return update.effective_user.id in ADMIN_IDS
 
+def log(update, category, file_type):
+    user = update.effective_user
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-def convert_drive_url(url: str) -> str:
-    if "drive.google.com" in url:
-        try:
-            if "/file/d/" in url:
-                file_id = url.split("/d/")[1].split("/")[0]
-            elif "id=" in url:
-                file_id = url.split("id=")[1].split("&")[0]
-            else:
-                return url
+    username = f"@{user.username}" if user.username else "no_username"
 
-            return f"https://drive.google.com/uc?export=download&id={file_id}"
+    text = f"{now} | {username} ({user.id}) | {category} | {file_type}"
 
-        except:
-            return url
-
-    return url
+    next_row = len(ws.col_values(10)) + 1
+    ws.update_cell(next_row, 10, text)
 
 # ======================================================
 # KEYBOARDS
 # ======================================================
 
-def kb_main(lang, admin=False):
-    t = TEXTS[lang]
-
-    kb = [
-        [
-            KeyboardButton(t["catalog"]),
-            KeyboardButton(t["contact"]),
-            KeyboardButton(t["location"])
-        ]
-    ]
-
+def kb_main(admin=False):
+    kb = [["Каталог", "Связаться", "Локация"]]
     if admin:
-        kb.append([KeyboardButton(t["admin"])])
-
+        kb.append(["Админ"])
     return ReplyKeyboardMarkup(kb, resize_keyboard=True)
 
-
-def kb_catalog(lang):
-    t = TEXTS[lang]
-
+def kb_catalog():
     return ReplyKeyboardMarkup([
-        [t["kitchen"], t["bedroom"]],
-        [t["other"], t["soft"]],
-        [t["video"]],
-        [t["back"]]
+        ["Кухня", "Спальня"],
+        ["Другое", "Мягкая"],
+        ["Видео"],
+        ["Назад"]
     ], resize_keyboard=True)
 
-
-def kb_more(lang):
-    t = TEXTS[lang]
-
+def kb_admin():
     return ReplyKeyboardMarkup([
-        [t["more"], t["back"]]
+        ["Кухня", "Спальня"],
+        ["Другое", "Мягкая"],
+        ["Видео"],
+        ["Назад"]
     ], resize_keyboard=True)
-
-
-def kb_yesno(lang):
-    t = TEXTS[lang]
-
-    return ReplyKeyboardMarkup([
-        [t["yes"], t["no"]]
-    ], resize_keyboard=True)
-
-
-def kb_admin(lang):
-    t = TEXTS[lang]
-
-    return ReplyKeyboardMarkup([
-        [t["kitchen"], t["bedroom"]],
-        [t["other"], t["soft"]],
-        [t["video"]],
-        [t["back"]]
-    ], resize_keyboard=True)
-
-# ======================================================
-# LOG
-# ======================================================
-
-def write_log(update, category, file_type):
-    user = update.effective_user
-
-    username = f"@{user.username}" if user.username else "no_username"
-
-    now = datetime.now().strftime("%Y-%m-%d %H:%M")
-
-    text = f"{now} | {username} ({user.id}) | {category} | {file_type}"
-
-    next_row = len(ws.col_values(10)) + 1
-
-    ws.update_cell(next_row, 10, text)
-
-# ======================================================
-# DRIVE UPLOAD
-# ======================================================
-
-def upload_to_drive(file_bytes, filename, mime_type, folder_id):
-    file_metadata = {
-        "name": filename,
-        "parents": [folder_id]
-    }
-
-    media = MediaIoBaseUpload(
-        io.BytesIO(file_bytes),
-        mimetype=mime_type
-    )
-
-    file = drive_service.files().create(
-        body=file_metadata,
-        media_body=media,
-        fields="id"
-    ).execute()
-
-    file_id = file.get("id")
-
-    drive_service.permissions().create(
-        fileId=file_id,
-        body={
-            "type": "anyone",
-            "role": "reader"
-        }
-    ).execute()
-
-    return f"https://drive.google.com/file/d/{file_id}/view"
 
 # ======================================================
 # START
 # ======================================================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Выберите язык",
-        reply_markup=ReplyKeyboardMarkup(
-            [["Узбекский 🇺🇿", "Русский 🇷🇺"]],
-            resize_keyboard=True
-        )
-    )
+    context.user_data.clear()
+    await update.message.reply_text("Меню", reply_markup=kb_main(is_admin(update)))
 
-# ======================================================
-# CACHE SEND
-# ======================================================
-
-async def send_cached(bot_method, chat_id, url, is_video=False):
-    if url in CACHE:
-        return await bot_method(chat_id, CACHE[url])
-
-    msg = await bot_method(chat_id, url)
-
-    try:
-        if is_video:
-            CACHE[url] = msg.video.file_id
-        else:
-            CACHE[url] = msg.photo[-1].file_id
-    except:
-        pass
-
-    return msg
-
-# ======================================================
-# SEND PAGE
-# ======================================================
-
-for i in range(idx - 1, min(idx + 9, len(values))):
-    file_id = values[i].strip()
-
-    if not file_id:
-        continue
-
-    if typ == "video":
-        await send_cached(
-            context.bot.send_video,
-            update.effective_chat.id,
-            file_id,
-            True
-        )
-    else:
-        await send_cached(
-            context.bot.send_photo,
-            update.effective_chat.id,
-            file_id
-        )
 # ======================================================
 # TEXT HANDLER
 # ======================================================
 
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
-
     u = context.user_data
 
-    # LANGUAGE
-
-    if text == "Русский 🇷🇺":
-        u.clear()
-        u["lang"] = "ru"
-
-        await update.message.reply_text(
-            TEXTS["ru"]["menu"],
-            reply_markup=kb_main("ru", is_admin(update))
-        )
-        return
-
-    if text == "Узбекский 🇺🇿":
-        u.clear()
-        u["lang"] = "uz"
-
-        await update.message.reply_text(
-            TEXTS["uz"]["menu"],
-            reply_markup=kb_main("uz", is_admin(update))
-        )
-        return
-
-    lang = get_lang(u)
-
-    t = TEXTS[lang]
-
-    # ADMIN PANEL
-
-    if text == t["admin"] and is_admin(update):
+    if text == "Админ" and is_admin(update):
         u["admin"] = True
-
-        await update.message.reply_text(
-            "ADMIN MODE",
-            reply_markup=kb_admin(lang)
-        )
+        await update.message.reply_text("Админ режим", reply_markup=kb_admin())
         return
 
-    # BACK
-
-    if text == t["back"]:
+    if text == "Назад":
         u["admin"] = False
-
-        await update.message.reply_text(
-            t["menu"],
-            reply_markup=kb_main(lang, is_admin(update))
-        )
+        await update.message.reply_text("Меню", reply_markup=kb_main(is_admin(update)))
         return
 
-    # MAIN
-
-    if text == t["catalog"]:
-        await update.message.reply_text(
-            t["catalog"],
-            reply_markup=kb_catalog(lang)
-        )
+    if text == "Каталог":
+        await update.message.reply_text("Каталог", reply_markup=kb_catalog())
         return
-
-    if text == t["contact"]:
-        await update.message.reply_text(
-            ws.acell("F1").value or "-",
-            reply_markup=kb_main(lang, is_admin(update))
-        )
-        return
-
-    if text == t["location"]:
-        await update.message.reply_text(
-            ws.acell("G1").value or "-",
-            reply_markup=kb_main(lang, is_admin(update))
-        )
-        return
-
-    if text == t["yes"]:
-        await update.message.reply_text(
-            t["catalog"],
-            reply_markup=kb_catalog(lang)
-        )
-        return
-
-    if text == t["no"]:
-        await update.message.reply_text(
-            t["menu"],
-            reply_markup=kb_main(lang, is_admin(update))
-        )
-        return
-
-    if text == t["more"]:
-        await send_page(update, context, True)
-        return
-
-    # CATEGORY MAP
 
     mapping = {
-        t["kitchen"]: ("A", "photo"),
-        t["bedroom"]: ("B", "photo"),
-        t["other"]: ("C", "photo"),
-        t["video"]: ("D", "video"),
-        t["soft"]: ("E", "photo"),
+        "Кухня": "A",
+        "Спальня": "B",
+        "Другое": "C",
+        "Видео": "D",
+        "Мягкая": "E"
     }
 
-    # ADMIN CATEGORY SELECT
-
-    if u.get("admin") and text in mapping:
-        col, typ = mapping[text]
-
-        u["upload_col"] = col
-        u["upload_type"] = typ
-
-        await update.message.reply_text(
-            t["send_file"],
-            reply_markup=ReplyKeyboardRemove()
-        )
-
+    if text in mapping:
+        u["col"] = mapping[text]
+        await update.message.reply_text("Отправь фото/видео")
         return
 
-    # USER CATEGORY SELECT
-
-    if text in mapping:
-        col, typ = mapping[text]
-
-        u["col"] = col
-        u["type"] = typ
-        u["idx"] = 1
-
-        await send_page(update, context)
-
 # ======================================================
-# MEDIA HANDLER
+# MEDIA HANDLER (file_id ONLY)
 # ======================================================
 
 async def media_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -486,53 +170,32 @@ async def media_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not u.get("admin"):
         return
 
-    col = u.get("upload_col")
-
+    col = u.get("col")
     if not col:
-        await update.message.reply_text("❌ Категория не выбрана")
         return
 
-    try:
-        file_id = None
-        file_type = None
+    file_id = None
+    file_type = None
 
-        # PHOTO
-        if update.message.photo:
-            file_id = update.message.photo[-1].file_id
-            file_type = "photo"
+    if update.message.photo:
+        file_id = update.message.photo[-1].file_id
+        file_type = "photo"
 
-        # VIDEO
-        elif update.message.video:
-            file_id = update.message.video.file_id
-            file_type = "video"
+    elif update.message.video:
+        file_id = update.message.video.file_id
+        file_type = "video"
 
-        else:
-            await update.message.reply_text("❌ Неподдерживаемый файл")
-            return
+    else:
+        return
 
-        # SAVE TO SHEET
-        col_index = ord(col) - 64
-        next_row = len(ws.col_values(col_index)) + 1
+    col_index = ord(col) - 64
+    next_row = len(ws.col_values(col_index)) + 1
 
-        ws.update_cell(next_row, col_index, file_id)
+    ws.update_cell(next_row, col_index, file_id)
 
-        # LOG
-        write_log(update, col, file_type)
+    log(update, col, file_type)
 
-        lang = get_lang(u)
-
-        await update.message.reply_text(
-            TEXTS[lang]["upload_ok"],
-            reply_markup=kb_admin(lang)
-        )
-
-    except Exception as e:
-        print("UPLOAD ERROR:", e)
-
-        await update.message.reply_text(
-            f"❌ ERROR: {e}",
-            reply_markup=kb_admin(get_lang(u))
-        )
+    await update.message.reply_text("Готово", reply_markup=kb_admin())
 
 # ======================================================
 # WEBHOOK
@@ -540,7 +203,6 @@ async def media_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle(request):
     data = await request.json()
-
     update = Update.de_json(data, request.app["bot"])
 
     asyncio.create_task(
@@ -557,53 +219,27 @@ async def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
-
-    app.add_handler(
-        MessageHandler(
-            filters.TEXT & ~filters.COMMAND,
-            text_handler
-        )
-    )
-
-    app.add_handler(
-        MessageHandler(
-            filters.PHOTO | filters.VIDEO,
-            media_handler
-        )
-    )
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
+    app.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO, media_handler))
 
     await app.initialize()
     await app.start()
 
     webhook = WEBHOOK_URL.rstrip("/") + "/" + BOT_TOKEN
-
-    print("WEBHOOK:", webhook)
-
     await app.bot.set_webhook(webhook)
 
     aio = web.Application()
-
     aio["bot"] = app.bot
     aio["app"] = app
 
     aio.router.add_post(f"/{BOT_TOKEN}", handle)
 
-    # health check
-    async def health(request):
-        return web.Response(text="OK")
-
-    aio.router.add_get("/", health)
+    aio.router.add_get("/", lambda r: web.Response(text="OK"))
 
     runner = web.AppRunner(aio)
-
     await runner.setup()
 
-    site = web.TCPSite(
-        runner,
-        "0.0.0.0",
-        PORT
-    )
-
+    site = web.TCPSite(runner, "0.0.0.0", PORT)
     await site.start()
 
     print("SERVER STARTED")
@@ -612,8 +248,4 @@ async def main():
         await asyncio.sleep(3600)
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except Exception as e:
-        print("🔥 FATAL ERROR:")
-        print(e)
+    asyncio.run(main())
