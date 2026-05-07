@@ -8,7 +8,7 @@ from datetime import datetime
 from aiohttp import web
 from google.oauth2.service_account import Credentials
 
-from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
+from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -21,9 +21,7 @@ logging.basicConfig(level=logging.INFO)
 
 print("BOT STARTING...")
 
-# ======================================================
-# ENV
-# ======================================================
+# ================= ENV =================
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 SHEET_ID = os.environ["SHEET_ID"]
@@ -35,28 +33,19 @@ ADMIN_IDS = [
     int(x) for x in os.environ.get("ADMIN_IDS", "").split(",") if x.strip()
 ]
 
-if not all([BOT_TOKEN, SHEET_ID, SERVICE_ACCOUNT_JSON, WEBHOOK_URL]):
-    raise ValueError("Missing ENV variables")
-
-# ======================================================
-# GOOGLE SHEETS
-# ======================================================
+# ================= GOOGLE SHEETS =================
 
 creds_dict = json.loads(SERVICE_ACCOUNT_JSON)
 
 credentials = Credentials.from_service_account_info(
     creds_dict,
-    scopes=[
-        "https://www.googleapis.com/auth/spreadsheets"
-    ]
+    scopes=["https://www.googleapis.com/auth/spreadsheets"]
 )
 
 gc = gspread.authorize(credentials)
 ws = gc.open_by_key(SHEET_ID).sheet1
 
-# ======================================================
-# TEXTS
-# ======================================================
+# ================= TEXTS =================
 
 TEXTS = {
     "ru": {
@@ -64,18 +53,13 @@ TEXTS = {
         "catalog": "Каталог",
         "contact": "Связаться",
         "location": "Локация",
-        "admin": "Админ",
+        "admin": "Админ панель",
         "back": "Назад",
         "upload_ok": "Загружено"
     }
 }
 
-# ======================================================
-# HELPERS
-# ======================================================
-
-def lang(u):
-    return u.get("lang", "ru")
+# ================= HELPERS =================
 
 def is_admin(update):
     return update.effective_user.id in ADMIN_IDS
@@ -85,20 +69,17 @@ def log(update, category, file_type):
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
 
     username = f"@{user.username}" if user.username else "no_username"
-
     text = f"{now} | {username} ({user.id}) | {category} | {file_type}"
 
     next_row = len(ws.col_values(10)) + 1
     ws.update_cell(next_row, 10, text)
 
-# ======================================================
-# KEYBOARDS
-# ======================================================
+# ================= KEYBOARDS =================
 
 def kb_main(admin=False):
     kb = [["Каталог", "Связаться", "Локация"]]
     if admin:
-        kb.append(["Админ"])
+        kb.append(["Админ панель"])
     return ReplyKeyboardMarkup(kb, resize_keyboard=True)
 
 def kb_catalog():
@@ -117,50 +98,45 @@ def kb_admin():
         ["Назад"]
     ], resize_keyboard=True)
 
-# ======================================================
-# START
-# ======================================================
+# ================= START =================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
-    context.user_data["mode"] = "client"
-
     await update.message.reply_text(
         "Меню",
         reply_markup=kb_main(is_admin(update))
     )
 
-# ======================================================
-# TEXT HANDLER
-# ======================================================
+# ================= TEXT HANDLER =================
 
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     u = context.user_data
 
-if text == "Админ" and is_admin(update):
-    u["mode"] = "admin"
-    await update.message.reply_text("Админ режим", reply_markup=kb_admin())
-    return
+    # RESET ADMIN ON /start
+    if text == "/start":
+        u.clear()
+        await start(update, context)
+        return
+
+    # ADMIN MODE ENABLE
+    if text == "Админ панель" and is_admin(update):
+        u["admin"] = True
         await update.message.reply_text("Админ режим", reply_markup=kb_admin())
         return
 
-if text == "Назад":
-    u["mode"] = "client"
-    u.pop("col", None)
-
-    await update.message.reply_text(
-        "Меню",
-        reply_markup=kb_main(is_admin(update))
-    )
-    return
+    # BACK
+    if text == "Назад":
+        u["admin"] = False
         await update.message.reply_text("Меню", reply_markup=kb_main(is_admin(update)))
         return
 
+    # CATALOG
     if text == "Каталог":
         await update.message.reply_text("Каталог", reply_markup=kb_catalog())
         return
 
+    # CATEGORY MAP
     mapping = {
         "Кухня": "A",
         "Спальня": "B",
@@ -174,16 +150,13 @@ if text == "Назад":
         await update.message.reply_text("Отправь фото/видео")
         return
 
-# ======================================================
-# MEDIA HANDLER (file_id ONLY)
-# ======================================================
-if u.get("mode") != "admin":
-    return
+# ================= MEDIA HANDLER =================
+
 async def media_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     u = context.user_data
 
-if u.get("mode") != "admin":
-    return
+    if not u.get("admin"):
+        return
 
     col = u.get("col")
     if not col:
@@ -210,11 +183,12 @@ if u.get("mode") != "admin":
 
     log(update, col, file_type)
 
-    await update.message.reply_text("Готово", reply_markup=kb_admin())
+    await update.message.reply_text(
+        "Готово",
+        reply_markup=kb_admin()
+    )
 
-# ======================================================
-# WEBHOOK
-# ======================================================
+# ================= WEBHOOK =================
 
 async def handle(request):
     data = await request.json()
@@ -226,9 +200,7 @@ async def handle(request):
 
     return web.Response()
 
-# ======================================================
-# MAIN
-# ======================================================
+# ================= MAIN =================
 
 async def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
@@ -248,7 +220,6 @@ async def main():
     aio["app"] = app
 
     aio.router.add_post(f"/{BOT_TOKEN}", handle)
-
     aio.router.add_get("/", lambda r: web.Response(text="OK"))
 
     runner = web.AppRunner(aio)
