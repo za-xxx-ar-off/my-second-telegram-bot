@@ -61,9 +61,19 @@ if not all([BOT_TOKEN, SHEET_ID, SERVICE_ACCOUNT_JSON, WEBHOOK_URL]):
 # GOOGLE
 # ======================================================
 
-creds = json.loads(SERVICE_ACCOUNT_JSON)
+from google.oauth2.service_account import Credentials
 
-gc = gspread.service_account_from_dict(creds)
+SCOPES = [
+    "https://www.googleapis.com/auth/drive",
+    "https://www.googleapis.com/auth/spreadsheets"
+]
+
+credentials = Credentials.from_service_account_info(
+    creds,
+    scopes=SCOPES
+)
+
+gc = gspread.authorize(credentials)
 
 sh = gc.open_by_key(SHEET_ID)
 ws = sh.sheet1
@@ -71,7 +81,7 @@ ws = sh.sheet1
 drive_service = build(
     "drive",
     "v3",
-    credentials=gspread.service_account_from_dict(creds).auth,
+    credentials=credentials,
     cache_discovery=False
 )
 
