@@ -544,49 +544,70 @@ async def media_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     col = u.get("upload_col")
 
     if not col:
+        await update.message.reply_text("❌ Категория не выбрана")
         return
 
     file = None
     mime = "image/jpeg"
     file_type = "photo"
 
-    if update.message.photo:
-        file = await update.message.photo[-1].get_file()
+    try:
 
-    elif update.message.video:
-        file = await update.message.video.get_file()
-        mime = "video/mp4"
-        file_type = "video"
+        # ===== PHOTO =====
+        if update.message.photo:
+            file = await update.message.photo[-1].get_file()
 
-    else:
-        return
+        # ===== VIDEO =====
+        elif update.message.video:
+            file = await update.message.video.get_file()
+            mime = "video/mp4"
+            file_type = "video"
 
-    data = await file.download_as_bytearray()
+        else:
+            await update.message.reply_text("❌ Неподдерживаемый файл")
+            return
 
-    folder_id = FOLDERS.get(col)
+        # ===== DOWNLOAD FILE =====
+        data = await file.download_as_bytearray()
 
-    if not folder_id:
-        await update.message.reply_text("❌ Folder ID not set")
-        return
+        folder_id = FOLDERS.get(col)
 
-    link = upload_to_drive(
-        data,
-        f"{datetime.now().timestamp()}",
-        mime,
-        folder_id
-    )
+        if not folder_id:
+            await update.message.reply_text("❌ Folder ID not set")
+            return
 
-    col_index = ord(col) - 64
+        # ===== UPLOAD TO DRIVE =====
+        link = upload_to_drive(
+            data,
+            f"{datetime.now().timestamp()}",
+            mime,
+            folder_id
+        )
 
-    next_row = len(ws.col_values(col_index)) + 1
+        # ===== SAVE TO SHEET =====
+        col_index = ord(col) - 64
 
-    ws.update_cell(next_row, col_index, link)
+        next_row = len(ws.col_values(col_index)) + 1
 
-    write_log(update, col, file_type)
+        ws.update_cell(next_row, col_index, link)
 
-    await update.message.reply_text(
-        TEXTS[get_lang(u)]["upload_ok"]
-    )
+        # ===== LOG =====
+        write_log(update, col, file_type)
+
+        lang = get_lang(u)
+
+        await update.message.reply_text(
+            TEXTS[lang]["upload_ok"],
+            reply_markup=kb_admin(lang)
+        )
+
+    except Exception as e:
+        print("UPLOAD ERROR:", e)
+
+        await update.message.reply_text(
+            f"❌ ERROR:\n{str(e)}",
+            reply_markup=kb_admin(get_lang(u))
+        )
 
 # ======================================================
 # WEBHOOK
